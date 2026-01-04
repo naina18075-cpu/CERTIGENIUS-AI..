@@ -36,8 +36,10 @@ export interface CertificateContent {
 export interface Participant {
   id: string;
   name: string;
+  email?: string;
   rank?: string;
   role?: string;
+  status?: 'pending' | 'sent' | 'error';
   [key: string]: string | undefined; // Dynamic fields from CSV
 }
 
@@ -52,6 +54,6 @@ export interface AppState {
 export enum ViewMode {
   ADMIN_DESIGN = 'ADMIN_DESIGN',
   ADMIN_DATA = 'ADMIN_DATA',
-  PARTICIPANT_LOGIN = 'PARTICIPANT_LOGIN',
-  PARTICIPANT_VIEW = 'PARTICIPANT_VIEW',
+  // PARTICIPANT_LOGIN = 'PARTICIPANT_LOGIN', // Removed
+  // PARTICIPANT_VIEW = 'PARTICIPANT_VIEW', // Removed
 }

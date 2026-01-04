@@ -13,38 +13,17 @@ const App: React.FC = () => {
     content: DEFAULT_CONTENT,
     images: [],
     participants: [],
+    // serverConfig is removed from AppState as it's no longer needed
     projectSavedTime: null,
   });
 
-  // Check URL hash on load to simulate QR scan landing
-  useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith('#claim')) {
-        setViewMode(ViewMode.PARTICIPANT_LOGIN);
-      } else if (hash.startsWith('#portable')) {
-        setViewMode(ViewMode.PARTICIPANT_VIEW);
-      } else {
-        setViewMode(ViewMode.ADMIN_DESIGN);
-      }
-    };
-
-    // Listen for hash changes
-    window.addEventListener('hashchange', handleHashChange);
-    
-    // Check initial hash
-    handleHashChange();
-
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  // Removed useEffect for hash change as public access modes are deprecated.
+  // The app will now primarily operate in admin mode.
+  // ParticipantView will only be accessed via direct action from AdminPanel.
 
   const handleViewChange = (mode: ViewMode) => {
     setViewMode(mode);
-    if (mode === ViewMode.PARTICIPANT_LOGIN) {
-      window.location.hash = 'claim';
-    } else if (mode === ViewMode.ADMIN_DESIGN) {
-      window.location.hash = '';
-    }
+    // Removed hash manipulations as public access modes are deprecated.
   };
 
   return (
@@ -56,6 +35,8 @@ const App: React.FC = () => {
           onViewChange={handleViewChange}
         />
       ) : (
+        // ParticipantView is now a 'preview' for the admin, potentially showing unsaved local data.
+        // The onBack prop now simply returns to ADMIN_DESIGN mode.
         <ParticipantView 
           onBack={() => handleViewChange(ViewMode.ADMIN_DESIGN)} 
         />

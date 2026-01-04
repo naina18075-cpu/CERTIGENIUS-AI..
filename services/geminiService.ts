@@ -24,3 +24,13 @@ export const generateCertificateText = async (
     throw new Error("Failed to generate text using AI.");
   }
 };
+
+/**
+ * NOTE: Nodemailer cannot be used in the browser (frontend).
+ * To send real emails, you must:
+ * 1. Set up a backend server (Node.js/Express).
+ * 2. Use the 'nodemailer' code there.
+ * 3. Configure the Admin Panel 'SMTP Endpoint' to point to your backend.
+ * 
+ * The code below is removed to prevent build errors.
+ */

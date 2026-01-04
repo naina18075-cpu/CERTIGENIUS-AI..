@@ -9,26 +9,23 @@ import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import { 
   Upload, 
-  Move, 
   Type, 
   Palette, 
   Settings, 
-  QrCode, 
   Wand2, 
   Trash2,
   Users,
   PenTool,
-  Share2,
   Download,
-  Copy,
-  ExternalLink,
-  Globe,
   Loader2,
   Eye,
   FileArchive,
   X,
   Plus,
-  UserPlus
+  UserPlus,
+  Mail,
+  Check,
+  AlertCircle
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -43,81 +40,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
   const [aiTopic, setAiTopic] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   
-  // QR & Link State
-  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
-  const [publicUrl, setPublicUrl] = useState('');
+  // Removed QR & Link State (qrBlobUrl, publicUrl)
   
   // Bulk Export State
   const [isBulkExporting, setIsBulkExporting] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
   const [exportingParticipant, setExportingParticipant] = useState<Participant | null>(null);
 
-  // Individual QR Modal
-  const [selectedForQr, setSelectedForQr] = useState<Participant | null>(null);
-  const [individualQrUrl, setIndividualQrUrl] = useState<string | null>(null);
+  // Removed Individual QR Modal State (selectedForQr, individualQrUrl)
 
   // Manual Participant Entry State
-  const [newParticipant, setNewParticipant] = useState({ name: '', id: '', rank: '', role: '' });
+  const [newParticipant, setNewParticipant] = useState({ name: '', id: '', rank: '', role: '', email: '' });
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const signatureInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const stopBulkRef = useRef(false);
 
-  // Initialize publicUrl on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setPublicUrl(window.location.href.split('#')[0]);
-    }
-  }, []);
-
-  // --- QR Logic ---
-
-  // Master Claim URL
-  const claimUrl = publicUrl ? `${publicUrl}#claim` : '';
-
-  useEffect(() => {
-    if (claimUrl) {
-      const apiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(claimUrl)}`;
-      fetch(apiUrl)
-        .then(res => res.blob())
-        .then(blob => {
-          const objectUrl = URL.createObjectURL(blob);
-          setQrBlobUrl(objectUrl);
-        })
-        .catch(err => console.error("Error fetching QR code", err));
-    }
-    return () => { if (qrBlobUrl) URL.revokeObjectURL(qrBlobUrl); };
-  }, [claimUrl]);
-
-  // Individual "Portable" QR Logic
-  useEffect(() => {
-    if (selectedForQr && publicUrl) {
-      // Create a payload with just essential text data (no images)
-      const payload = {
-        pId: selectedForQr.id,
-        pName: selectedForQr.name,
-        pExtras: selectedForQr, // other csv fields including rank/role
-        design: state.design,
-        content: state.content
-        // images omitted to keep URL length scannable
-      };
-      
-      const b64Data = btoa(JSON.stringify(payload));
-      const portableUrl = `${publicUrl}#portable?data=${b64Data}`;
-      
-      const apiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(portableUrl)}`;
-      fetch(apiUrl)
-        .then(res => res.blob())
-        .then(blob => {
-          const objectUrl = URL.createObjectURL(blob);
-          setIndividualQrUrl(objectUrl);
-        })
-        .catch(err => console.error("Error fetching individual QR", err));
-    } else {
-      setIndividualQrUrl(null);
-    }
-  }, [selectedForQr, publicUrl, state.design, state.content]);
+  // Removed useEffect for publicUrl initialization.
+  // Removed useEffect for Master QR generation.
+  // Removed useEffect for Individual "Portable" QR Logic.
 
 
   // --- Handlers ---
@@ -200,6 +143,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
             });
             if (!newRow.id) newRow.id = Math.random().toString(36).substr(2, 9);
             if (!newRow.name) newRow.name = "Unknown Participant";
+            if (!newRow.email) newRow.email = ""; 
+            newRow.status = 'pending';
             return newRow;
           });
           
@@ -217,7 +162,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
       id: newParticipant.id || Math.random().toString(36).substr(2, 9),
       name: newParticipant.name,
       rank: newParticipant.rank,
-      role: newParticipant.role
+      role: newParticipant.role,
+      email: newParticipant.email,
+      status: 'pending'
     };
 
     setState(prev => ({
@@ -225,7 +172,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
       participants: [participant, ...prev.participants]
     }));
 
-    setNewParticipant({ name: '', id: '', rank: '', role: '' });
+    setNewParticipant({ name: '', id: '', rank: '', role: '', email: '' });
   };
 
   const handleDeleteParticipant = (id: string) => {
@@ -235,36 +182,85 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
     }));
   };
 
-  // --- Export Functions ---
+  // --- Export & Email Functions ---
 
   const generateSinglePdfBlob = async (participant: Participant): Promise<{blob: Blob, name: string} | null> => {
     if (!canvasRef.current) return null;
     
-    // Set participant to render
+    // 1. Set the participant to be rendered
     setExportingParticipant(participant);
-    // Wait for render
-    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // 2. Wait for React render cycle + font adjustment
+    // Increased to 250ms to ensure complete stability during loops
+    await new Promise(resolve => setTimeout(resolve, 250));
 
-    const canvas = await html2canvas(canvasRef.current, {
-      scale: 1.5,
-      useCORS: true,
-      logging: false,
-      backgroundColor: null
-    });
+    // 3. Capture
+    try {
+      const canvas = await html2canvas(canvasRef.current, {
+        scale: 1.5,
+        useCORS: true,
+        logging: false,
+        backgroundColor: null
+      });
 
-    return new Promise(resolve => {
-        const pdf = new jsPDF({
-          orientation: 'landscape',
-          unit: 'px',
-          format: [1000, 707],
-          hotfixes: ['px_scaling']
-        });
-        const imgData = canvas.toDataURL('image/jpeg', 0.85);
-        pdf.addImage(imgData, 'JPEG', 0, 0, 1000, 707);
-        const blob = pdf.output('blob');
-        const name = `Certificate_${participant.name.replace(/\s+/g,'_')}.pdf`;
-        resolve({ blob, name });
-    });
+      return new Promise(resolve => {
+          const pdf = new jsPDF({
+            orientation: 'landscape',
+            unit: 'px',
+            format: [1000, 707],
+            hotfixes: ['px_scaling']
+          });
+          const imgData = canvas.toDataURL('image/jpeg', 0.85);
+          pdf.addImage(imgData, 'JPEG', 0, 0, 1000, 707);
+          const blob = pdf.output('blob');
+          const name = `Certificate_${participant.name.replace(/\s+/g,'_')}.pdf`;
+          resolve({ blob, name });
+      });
+    } catch (error) {
+      console.error("Canvas capture failed for", participant.name, error);
+      return null;
+    }
+  };
+
+  // Option 1: Manual "Download & Draft" (Zero Config, User's Email)
+  const handleManualDraft = async (participant: Participant) => {
+    if (!participant.email) {
+        alert("No email address for this participant.");
+        return;
+    }
+
+    try {
+        const result = await generateSinglePdfBlob(participant);
+        if (result) {
+            // 1. Download File
+            const url = URL.createObjectURL(result.blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = result.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // 2. Open Mail Client (Deferred slightly)
+            const subject = encodeURIComponent(state.content.title || "Certificate");
+            const body = encodeURIComponent(`Dear ${participant.name},\n\nPlease find your certificate attached.\n\nBest regards.`);
+            
+            setTimeout(() => {
+                window.location.href = `mailto:${participant.email}?subject=${subject}&body=${body}`;
+                
+                // 3. User Instructions
+                setTimeout(() => {
+                    alert(`✅ Certificate Downloaded & Draft Opened!\n\nDue to browser security:\n1. The file has been saved to your downloads.\n2. Please DRAG the file into the email window that just opened.`);
+                }, 500);
+            }, 500);
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Error generating certificate.");
+    } finally {
+        setExportingParticipant(null);
+    }
   };
 
   const handleIndividualDownload = async (p: Participant) => {
@@ -293,6 +289,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
     if (!canvasRef.current) return;
 
     setIsBulkExporting(true);
+    stopBulkRef.current = false;
     setBulkProgress({ current: 0, total: state.participants.length });
 
     const pdf = new jsPDF({
@@ -304,10 +301,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
 
     try {
       for (let i = 0; i < state.participants.length; i++) {
+        if (stopBulkRef.current) break;
+        
         const p = state.participants[i];
-        setExportingParticipant(p);
+        
         setBulkProgress(prev => ({ ...prev, current: i + 1 }));
-        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // Use generator to handle state + wait
+        setExportingParticipant(p);
+        await new Promise(resolve => setTimeout(resolve, 250));
 
         if (canvasRef.current) {
           const canvas = await html2canvas(canvasRef.current, {
@@ -321,19 +323,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
           pdf.addImage(imgData, 'JPEG', 0, 0, 1000, 707);
         }
       }
-      pdf.save(`All_Certificates_${new Date().toISOString().slice(0,10)}.pdf`);
+      if (!stopBulkRef.current) {
+        pdf.save(`All_Certificates_${new Date().toISOString().slice(0,10)}.pdf`);
+      } else {
+        alert("Export cancelled.");
+      }
     } catch (err) {
       console.error(err);
       alert("Failed.");
     } finally {
       setIsBulkExporting(false);
       setExportingParticipant(null);
+      stopBulkRef.current = false;
     }
   };
 
   const handleBulkDownloadZip = async () => {
      if (state.participants.length === 0) return;
      setIsBulkExporting(true);
+     stopBulkRef.current = false;
      setBulkProgress({ current: 0, total: state.participants.length });
      
      const zip = new JSZip();
@@ -341,6 +349,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
 
      try {
        for (let i = 0; i < state.participants.length; i++) {
+         if (stopBulkRef.current) break;
+         
          const p = state.participants[i];
          // Update progress UI
          setBulkProgress(prev => ({ ...prev, current: i + 1 }));
@@ -351,19 +361,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
          }
        }
        
-       const content = await zip.generateAsync({ type: "blob" });
-       const url = URL.createObjectURL(content);
-       const a = document.createElement('a');
-       a.href = url;
-       a.download = "Certificates_Archive.zip";
-       a.click();
-       URL.revokeObjectURL(url);
+       if (!stopBulkRef.current) {
+           const content = await zip.generateAsync({ type: "blob" });
+           const url = URL.createObjectURL(content);
+           const a = document.createElement('a');
+           a.href = url;
+           a.download = "Certificates_Archive.zip";
+           a.click();
+           URL.revokeObjectURL(url);
+       } else {
+           alert("Zip export cancelled.");
+       }
      } catch (err) {
        console.error(err);
        alert("ZIP generation failed.");
      } finally {
         setIsBulkExporting(false);
         setExportingParticipant(null);
+        stopBulkRef.current = false;
      }
   };
 
@@ -570,7 +585,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
         {/* Manual Add Form */}
         <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
           <h4 className="flex items-center font-bold text-gray-800 mb-3"><UserPlus size={18} className="mr-2 text-indigo-600" />Add Single Participant</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
              <input 
                type="text" 
                placeholder="Name *" 
@@ -587,17 +602,24 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
              />
              <input 
                type="text" 
-               placeholder="Rank (Optional)" 
+               placeholder="Rank" 
                className="border p-2 rounded text-sm"
                value={newParticipant.rank}
                onChange={(e) => setNewParticipant({...newParticipant, rank: e.target.value})}
              />
              <input 
                type="text" 
-               placeholder="Role (Optional)" 
+               placeholder="Role" 
                className="border p-2 rounded text-sm"
                value={newParticipant.role}
                onChange={(e) => setNewParticipant({...newParticipant, role: e.target.value})}
+             />
+             <input 
+               type="email" 
+               placeholder="Email (for sending)" 
+               className="border p-2 rounded text-sm"
+               value={newParticipant.email}
+               onChange={(e) => setNewParticipant({...newParticipant, email: e.target.value})}
              />
           </div>
           <button 
@@ -610,7 +632,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h4 className="flex items-center font-bold text-blue-900 mb-2"><Users size={18} className="mr-2" />Bulk Data Import</h4>
-          <p className="text-sm text-blue-800 mb-4">Upload a CSV with <code>id</code>, <code>name</code>, <code>rank</code>, <code>role</code> columns.</p>
+          <p className="text-sm text-blue-800 mb-4">Upload a CSV with <code>id</code>, <code>name</code>, <code>rank</code>, <code>role</code>, <code>email</code> columns.</p>
           <input type="file" accept=".csv" ref={csvInputRef} onChange={handleCsvUpload} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200" />
         </div>
 
@@ -635,25 +657,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
                 Export ZIP (Files)
               </button>
             </div>
-            {isBulkExporting && <div className="text-xs text-center text-gray-500">Processing {bulkProgress.current} / {bulkProgress.total}</div>}
+            {isBulkExporting && (
+              <div className="text-xs text-center text-gray-500 mt-2 bg-gray-50 p-1 rounded border">
+                Processing {bulkProgress.current} / {bulkProgress.total}: <strong>{exportingParticipant?.name}</strong>
+              </div>
+            )}
           </div>
         )}
-
-        <div className="bg-white border rounded-lg p-4 shadow-sm">
-           <div className="mb-4 pb-4 border-b">
-              <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center"><Globe size={16} className="mr-2 text-blue-500" />Public Access URL</label>
-              <p className="text-xs text-gray-500 mb-2">If scanning with a phone while running locally, change <code>localhost</code> to your IP (e.g., <code>192.168.1.5:3000</code>).</p>
-              <input type="text" value={publicUrl} onChange={(e) => setPublicUrl(e.target.value)} className="w-full border border-gray-300 rounded p-2 text-sm font-mono" placeholder="https://..." />
-           </div>
-           
-           <div className="flex items-center space-x-2">
-              <div className="flex-1">
-                 <h4 className="font-bold text-gray-900 flex items-center"><QrCode className="mr-2 h-4 w-4 text-indigo-600" /> Master QR</h4>
-                 <p className="text-xs text-gray-400">Links to search portal</p>
-              </div>
-              {qrBlobUrl && <img src={qrBlobUrl} alt="QR" className="w-12 h-12 border rounded" />}
-           </div>
-        </div>
+        
+        {/* Removed Public Access URL and Master QR sections */}
 
         <div className="max-h-60 overflow-y-auto border rounded relative">
           <table className="min-w-full text-xs text-left text-gray-500">
@@ -661,8 +673,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
               <tr>
                 <th className="px-4 py-2">ID</th>
                 <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Rank</th>
-                <th className="px-4 py-2">Role</th>
+                <th className="px-4 py-2">Rank/Role</th>
+                <th className="px-4 py-2">Email</th>
                 <th className="px-4 py-2 text-right">Actions</th>
               </tr>
             </thead>
@@ -671,12 +683,28 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
                 <tr key={idx} className="border-b hover:bg-gray-50">
                   <td className="px-4 py-2 font-mono text-[10px]">{p.id}</td>
                   <td className="px-4 py-2 font-medium text-gray-900">{p.name}</td>
-                  <td className="px-4 py-2 text-gray-600">{p.rank || '-'}</td>
-                  <td className="px-4 py-2 text-gray-600">{p.role || '-'}</td>
+                  <td className="px-4 py-2 text-gray-600">{p.rank} {p.role ? `(${p.role})` : ''}</td>
+                  <td className="px-4 py-2 text-gray-600 flex items-center gap-1">
+                    {p.email || '-'}
+                    {p.status === 'sent' && <Check size={12} className="text-green-500" />}
+                    {p.status === 'error' && <AlertCircle size={12} className="text-red-500" />}
+                  </td>
                   <td className="px-4 py-2 flex justify-end gap-2">
+                    {/* Manual Email Button (Download + Draft) - This is the only email option now */}
+                    <button 
+                      onClick={() => handleManualDraft(p)} 
+                      disabled={!p.email}
+                      title={p.email ? "Download & Open Email Draft (Manual Attach)" : "No email address"}
+                      className={`
+                        ${p.email ? 'text-gray-400 hover:text-blue-500' : 'text-gray-200 cursor-not-allowed'}
+                      `}
+                    >
+                      <Mail size={14} />
+                    </button>
+
                     <button onClick={() => setExportingParticipant(p)} title="Preview" className="text-gray-400 hover:text-blue-600"><Eye size={14} /></button>
                     <button onClick={() => handleIndividualDownload(p)} title="Download PDF" className="text-gray-400 hover:text-green-600"><Download size={14} /></button>
-                    <button onClick={() => setSelectedForQr(p)} title="Get Portable QR" className="text-gray-400 hover:text-indigo-600"><QrCode size={14} /></button>
+                    {/* Removed Get Portable QR button */}
                     <button onClick={() => handleDeleteParticipant(p.id)} title="Delete" className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -726,44 +754,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
              content={state.content}
              images={state.images}
              onMoveImage={handleMoveImage}
-             participant={exportingParticipant || { id: '12345', name: 'John A. Sample', rank: '1st', role: 'Winner' }} 
+             participant={exportingParticipant || { id: '12345', name: 'John A. Sample', rank: '1st', role: 'Winner', email: 'john@example.com' }} 
            />
         </div>
       </div>
 
-      {/* Individual QR Modal Overlay */}
-      {selectedForQr && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-           <div className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full relative">
-              <button onClick={() => setSelectedForQr(null)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"><X size={20}/></button>
-              <h3 className="text-lg font-bold mb-2 text-center text-gray-800">Portable QR Code</h3>
-              <p className="text-xs text-center text-gray-500 mb-4">
-                 For <strong>{selectedForQr.name}</strong>.<br/>
-                 This QR contains the certificate data embedded in the link. 
-                 <span className="text-orange-500 block mt-1">(Images omitted to fit in QR)</span>
-              </p>
-              
-              <div className="flex justify-center mb-4">
-                 {individualQrUrl ? (
-                    <img src={individualQrUrl} alt="Individual QR" className="w-48 h-48 border rounded-lg" />
-                 ) : (
-                    <div className="w-48 h-48 bg-gray-100 animate-pulse rounded-lg flex items-center justify-center text-xs text-gray-400">Generating...</div>
-                 )}
-              </div>
-              
-              <div className="flex justify-center">
-                 <a 
-                   href={individualQrUrl || '#'} 
-                   download={`QR_${selectedForQr.id}.png`}
-                   className={`bg-indigo-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center ${!individualQrUrl ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-700'}`}
-                 >
-                    <Download size={14} className="mr-2" />
-                    Save QR Image
-                 </a>
-              </div>
-           </div>
-        </div>
-      )}
+      {/* Removed Individual QR Modal Overlay */}
     </div>
   );
 };
