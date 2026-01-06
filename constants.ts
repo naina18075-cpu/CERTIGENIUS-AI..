@@ -37,7 +37,14 @@ export const DEFAULT_CONTENT: CertificateContent = {
   title: 'Certificate of Achievement',
   subtitle: 'This is proudly presented to',
   bodyTemplate: 'For outstanding performance and dedication in the Annual Tech Hackathon 2024. Your contribution has been invaluable to the success of the event.',
-  signerName: 'John Doe',
-  signerTitle: 'Director of Operations',
+  signerBlocks: [
+    {
+      id: 'signer-default-1',
+      name: 'John Doe',
+      title: 'Director of Operations',
+      x: 650, // Default position for a signature block
+      y: 550, // Default position for a signature block
+    }
+  ],
   date: new Date().toLocaleDateString(),
 };

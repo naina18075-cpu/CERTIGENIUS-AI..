@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AppState, ViewMode, ImageElement, Participant } from '../types';
+import { AppState, ViewMode, ImageElement, Participant, SignerBlock } from '../types';
 import { FONTS, THEMES } from '../constants';
 import CertificateCanvas from './CertificateCanvas';
 import { generateCertificateText } from '../services/geminiService';
@@ -25,7 +25,8 @@ import {
   UserPlus,
   Mail,
   Check,
-  AlertCircle
+  AlertCircle,
+  Pencil
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -40,28 +41,28 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
   const [aiTopic, setAiTopic] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   
-  // Removed QR & Link State (qrBlobUrl, publicUrl)
-  
   // Bulk Export State
   const [isBulkExporting, setIsBulkExporting] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
   const [exportingParticipant, setExportingParticipant] = useState<Participant | null>(null);
 
-  // Removed Individual QR Modal State (selectedForQr, individualQrUrl)
-
   // Manual Participant Entry State
   const [newParticipant, setNewParticipant] = useState({ name: '', id: '', rank: '', role: '', email: '' });
 
+  // Signer Management States
+  const [showSignerModal, setShowSignerModal] = useState(false);
+  const [editingSigner, setEditingSigner] = useState<SignerBlock | null>(null);
+  const [currentSignerName, setCurrentSignerName] = useState('');
+  const [currentSignerTitle, setCurrentSignerTitle] = useState('');
+
   const logoInputRef = useRef<HTMLInputElement>(null);
-  const signatureInputRef = useRef<HTMLInputElement>(null);
+  // Removed signatureInputRef - now handled per signer
   const csvInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const stopBulkRef = useRef(false);
 
-  // Removed useEffect for publicUrl initialization.
-  // Removed useEffect for Master QR generation.
-  // Removed useEffect for Individual "Portable" QR Logic.
-
+  // Ref for dynamically created file inputs for signer images
+  const signerImageInputRefs = useRef<{[key: string]: HTMLInputElement | null}>({});
 
   // --- Handlers ---
 
@@ -79,7 +80,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
     }));
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'signature') => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'decoration') => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -87,8 +88,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
         const newImage: ImageElement = {
           id: Date.now().toString() + Math.random().toString(), // Ensure unique ID
           src: event.target?.result as string,
-          x: type === 'logo' ? 50 : 650, // Default positions
-          y: type === 'logo' ? 50 : 550,
+          x: 50, // Default position
+          y: 50,
           width: 150,
           height: 100,
           type
@@ -97,18 +98,28 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
       };
       reader.readAsDataURL(file);
     }
-    e.target.value = '';
+    e.target.value = ''; // Clear file input
   };
 
   const removeImage = (id: string) => {
     setState(prev => ({ ...prev, images: prev.images.filter(img => img.id !== id) }));
   };
 
-  const handleMoveImage = (id: string, x: number, y: number) => {
-    setState(prev => ({
-      ...prev,
-      images: prev.images.map(img => img.id === id ? { ...img, x, y } : img)
-    }));
+  const handleMoveElement = (id: string, type: 'image' | 'signerBlock', x: number, y: number) => {
+    if (type === 'image') {
+      setState(prev => ({
+        ...prev,
+        images: prev.images.map(img => img.id === id ? { ...img, x, y } : img)
+      }));
+    } else if (type === 'signerBlock') {
+      setState(prev => ({
+        ...prev,
+        content: {
+          ...prev.content,
+          signerBlocks: prev.content.signerBlocks.map(signer => signer.id === id ? { ...signer, x, y } : signer)
+        }
+      }));
+    }
   };
 
   const handleAiGenerate = async () => {
@@ -180,6 +191,85 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
       ...prev,
       participants: prev.participants.filter(p => p.id !== id)
     }));
+  };
+
+  // --- Signer Block Management ---
+  const openAddSignerModal = () => {
+    setEditingSigner(null);
+    setCurrentSignerName('');
+    setCurrentSignerTitle('');
+    setShowSignerModal(true);
+  };
+
+  const openEditSignerModal = (signer: SignerBlock) => {
+    setEditingSigner(signer);
+    setCurrentSignerName(signer.name);
+    setCurrentSignerTitle(signer.title);
+    setShowSignerModal(true);
+  };
+
+  const saveSigner = () => {
+    if (!currentSignerName || !currentSignerTitle) {
+      alert('Signer name and title are required.');
+      return;
+    }
+
+    setState(prev => {
+      const newSignerBlocks = editingSigner 
+        ? prev.content.signerBlocks.map(s => 
+            s.id === editingSigner.id 
+              ? { ...s, name: currentSignerName, title: currentSignerTitle } 
+              : s
+          )
+        : [...prev.content.signerBlocks, {
+            id: `signer-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            name: currentSignerName,
+            title: currentSignerTitle,
+            x: 650, // Default X for new signers, adjust as needed
+            y: 550 + prev.content.signerBlocks.length * 100, // Stack vertically
+          }];
+      return {
+        ...prev,
+        content: { ...prev.content, signerBlocks: newSignerBlocks }
+      };
+    });
+    setShowSignerModal(false);
+  };
+
+  const removeSigner = (signerId: string) => {
+    setState(prev => ({
+      ...prev,
+      content: {
+        ...prev.content,
+        signerBlocks: prev.content.signerBlocks.filter(s => s.id !== signerId)
+      }
+    }));
+  };
+
+  const handleSignerImageUpload = (signerId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          setState(prev => ({
+            ...prev,
+            content: {
+              ...prev.content,
+              signerBlocks: prev.content.signerBlocks.map(s => 
+                s.id === signerId 
+                  ? { ...s, signatureImageSrc: event.target?.result as string, signatureWidth: 150, signatureHeight: 75 } // Default image size
+                  : s
+              )
+            }
+          }));
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = ''; // Clear file input
   };
 
   // --- Export & Email Functions ---
@@ -445,26 +535,66 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
           Available placeholders: <code>{`{{name}}`}</code>, <code>{`{{id}}`}</code>, <code>{`{{rank}}`}</code>, <code>{`{{role}}`}</code>
         </p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-           <label className="block text-sm font-medium text-gray-700">Signer Name</label>
-           <input 
-            type="text" 
-            className="mt-1 block w-full rounded-md border p-2"
-            value={state.content.signerName}
-            onChange={(e) => handleContentChange('signerName', e.target.value)}
-          />
-        </div>
-        <div>
-           <label className="block text-sm font-medium text-gray-700">Signer Title</label>
-           <input 
-            type="text" 
-            className="mt-1 block w-full rounded-md border p-2"
-            value={state.content.signerTitle}
-            onChange={(e) => handleContentChange('signerTitle', e.target.value)}
-          />
-        </div>
+      
+      {/* Signatures Section */}
+      <div className="space-y-3 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+          <h4 className="flex items-center font-bold text-gray-800"><PenTool size={18} className="mr-2 text-indigo-600" />Signatures</h4>
+          {state.content.signerBlocks.length === 0 && (
+            <p className="text-sm text-gray-500 italic">No signers added yet.</p>
+          )}
+          <ul className="space-y-2">
+            {state.content.signerBlocks.map((signer, index) => (
+              <li key={signer.id} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
+                <div className="flex items-center space-x-3">
+                  {signer.signatureImageSrc && (
+                    <img src={signer.signatureImageSrc} alt="Signature" className="w-12 h-8 object-contain bg-white p-1 border rounded" />
+                  )}
+                  <div>
+                    <p className="font-semibold text-sm">{signer.name}</p>
+                    <p className="text-xs text-gray-600">{signer.title}</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    ref={el => signerImageInputRefs.current[signer.id] = el} 
+                    onChange={(e) => handleSignerImageUpload(signer.id, e)} 
+                  />
+                  <button 
+                    onClick={() => signerImageInputRefs.current[signer.id]?.click()}
+                    title="Upload Signature Image"
+                    className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500"
+                  >
+                    <Upload size={16} />
+                  </button>
+                  <button 
+                    onClick={() => openEditSignerModal(signer)}
+                    title="Edit Signer Details"
+                    className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button 
+                    onClick={() => removeSigner(signer.id)}
+                    title="Remove Signer"
+                    className="p-1.5 rounded-full hover:bg-red-100 text-red-500"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <button 
+            onClick={openAddSignerModal}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2 px-4 rounded flex items-center justify-center mt-4"
+          >
+            <Plus size={16} className="mr-2" /> Add New Signer
+          </button>
       </div>
+
        <div>
         <label className="block text-sm font-medium text-gray-700">Date</label>
         <input 
@@ -554,9 +684,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
 
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 transition-colors flex flex-col items-center">
           <PenTool className="mx-auto h-6 w-6 text-purple-500 mb-2" />
-          <p className="text-sm font-medium text-gray-900 mb-1">Add Signature</p>
-          <input type="file" accept="image/*" className="hidden" ref={signatureInputRef} onChange={(e) => handleImageUpload(e, 'signature')} />
-          <button className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700" onClick={() => signatureInputRef.current?.click()}>Upload</button>
+          <p className="text-sm font-medium text-gray-900 mb-1">Add Decoration</p>
+          <input type="file" accept="image/*" className="hidden" id="decorationUpload" onChange={(e) => handleImageUpload(e, 'decoration')} />
+          <button className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700" onClick={() => document.getElementById('decorationUpload')?.click()}>Upload</button>
         </div>
       </div>
 
@@ -665,8 +795,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
           </div>
         )}
         
-        {/* Removed Public Access URL and Master QR sections */}
-
         <div className="max-h-60 overflow-y-auto border rounded relative">
           <table className="min-w-full text-xs text-left text-gray-500">
             <thead className="bg-gray-100 text-gray-700 sticky top-0 z-10">
@@ -704,7 +832,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
 
                     <button onClick={() => setExportingParticipant(p)} title="Preview" className="text-gray-400 hover:text-blue-600"><Eye size={14} /></button>
                     <button onClick={() => handleIndividualDownload(p)} title="Download PDF" className="text-gray-400 hover:text-green-600"><Download size={14} /></button>
-                    {/* Removed Get Portable QR button */}
                     <button onClick={() => handleDeleteParticipant(p.id)} title="Delete" className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </td>
                 </tr>
@@ -753,13 +880,51 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ state, setState, onViewChange }
              design={state.design}
              content={state.content}
              images={state.images}
-             onMoveImage={handleMoveImage}
+             onMoveElement={handleMoveElement} // Updated prop name
              participant={exportingParticipant || { id: '12345', name: 'John A. Sample', rank: '1st', role: 'Winner', email: 'john@example.com' }} 
            />
         </div>
       </div>
 
-      {/* Removed Individual QR Modal Overlay */}
+      {/* Signer Modal */}
+      {showSignerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md relative">
+            <button onClick={() => setShowSignerModal(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+              <X size={20} />
+            </button>
+            <h3 className="text-xl font-bold mb-4 text-gray-800">{editingSigner ? 'Edit Signer' : 'Add New Signer'}</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Signer Name</label>
+                <input 
+                  type="text" 
+                  value={currentSignerName}
+                  onChange={(e) => setCurrentSignerName(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2"
+                  placeholder="e.g., Jane Doe"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Signer Title</label>
+                <input 
+                  type="text" 
+                  value={currentSignerTitle}
+                  onChange={(e) => setCurrentSignerTitle(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2"
+                  placeholder="e.g., CEO, Head of Department"
+                />
+              </div>
+              <button 
+                onClick={saveSigner}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded"
+              >
+                {editingSigner ? 'Save Changes' : 'Add Signer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

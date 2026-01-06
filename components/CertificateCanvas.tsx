@@ -7,13 +7,13 @@ interface CertificateCanvasProps {
   design: DesignConfig;
   content: CertificateContent;
   images: ImageElement[];
-  onMoveImage: (id: string, x: number, y: number) => void;
+  onMoveElement: (id: string, type: 'image' | 'signerBlock', x: number, y: number) => void;
   participant?: Participant | null; // If provided, fills placeholders
   readOnly?: boolean;
 }
 
 const CertificateCanvas = forwardRef<HTMLDivElement, CertificateCanvasProps>(
-  ({ design, content, images, onMoveImage, participant, readOnly = false }, ref) => {
+  ({ design, content, images, onMoveElement, participant, readOnly = false }, ref) => {
     
     // Helper to replace placeholders
     const processText = (text: string) => {
@@ -73,29 +73,45 @@ const CertificateCanvas = forwardRef<HTMLDivElement, CertificateCanvasProps>(
                 <p>{processText(content.bodyTemplate)}</p>
               </div>
 
-              {/* Footer: Date & Signatures */}
-              <div className="absolute bottom-16 w-full px-20 flex justify-between items-end">
-                <div className="flex flex-col items-center border-t border-gray-400 pt-2 min-w-[200px]">
-                  <p className="text-lg font-bold">{content.date}</p>
-                  <p className="text-sm uppercase tracking-widest opacity-70">Date</p>
-                </div>
-
-                <div className="flex flex-col items-center border-t border-gray-400 pt-2 min-w-[200px]">
-                  {/* Signature Name as Text if no image is placed there, or just label */}
-                   <p className="text-lg font-bold">{content.signerName}</p>
-                   <p className="text-sm uppercase tracking-widest opacity-70">{content.signerTitle}</p>
-                </div>
+              {/* Date */}
+              <div className="absolute bottom-16 left-16 flex flex-col items-center border-t border-gray-400 pt-2 min-w-[200px]">
+                <p className="text-lg font-bold">{content.date}</p>
+                <p className="text-sm uppercase tracking-widest opacity-70">Date Issued</p>
               </div>
-
             </div>
 
-            {/* --- Draggable Layer (Logos, Signatures) --- */}
+            {/* --- Draggable Signer Blocks --- */}
+            {content.signerBlocks.map(signer => (
+              <Draggable
+                key={signer.id}
+                x={signer.x}
+                y={signer.y}
+                onDragEnd={(x, y) => onMoveElement(signer.id, 'signerBlock', x, y)}
+                editable={!readOnly}
+              >
+                <div className="flex flex-col items-center border-t border-gray-400 pt-2 px-4 min-w-[200px]">
+                  {signer.signatureImageSrc && (
+                    <img 
+                      src={signer.signatureImageSrc} 
+                      alt={`${signer.name} signature`}
+                      style={{ width: signer.signatureWidth || 150, height: signer.signatureHeight || 75 }}
+                      className="object-contain mb-2 pointer-events-none"
+                    />
+                  )}
+                  <p className="text-lg font-bold">{signer.name}</p>
+                  <p className="text-sm uppercase tracking-widest opacity-70">{signer.title}</p>
+                </div>
+              </Draggable>
+            ))}
+
+
+            {/* --- Draggable Generic Image Elements (Logos, Decorations) --- */}
             {images.map(img => (
               <Draggable
                 key={img.id}
                 x={img.x}
                 y={img.y}
-                onDragEnd={(x, y) => onMoveImage(img.id, x, y)}
+                onDragEnd={(x, y) => onMoveElement(img.id, 'image', x, y)}
                 editable={!readOnly}
               >
                 <img 

@@ -10,7 +10,18 @@ export interface ImageElement {
   y: number;
   width: number;
   height: number;
-  type: 'logo' | 'signature';
+  type: 'logo' | 'decoration'; // Changed 'signature' to 'decoration' to differentiate from SignerBlock signatures
+}
+
+export interface SignerBlock {
+  id: string; // Unique ID for this block
+  name: string;
+  title: string;
+  x: number;
+  y: number;
+  signatureImageSrc?: string; // Base64 string of the signature image, if any
+  signatureWidth?: number; // width of signature image, if any
+  signatureHeight?: number; // height of signature image, if any
 }
 
 export interface DesignConfig {
@@ -28,8 +39,7 @@ export interface CertificateContent {
   title: string;
   subtitle: string;
   bodyTemplate: string; // Contains {{name}}, {{id}}, etc.
-  signerName: string;
-  signerTitle: string;
+  signerBlocks: SignerBlock[]; // Array of signer blocks
   date: string;
 }
 
@@ -52,8 +62,7 @@ export interface AppState {
 }
 
 export enum ViewMode {
+  WELCOME = 'WELCOME', // New Welcome screen view mode
   ADMIN_DESIGN = 'ADMIN_DESIGN',
   ADMIN_DATA = 'ADMIN_DATA',
-  // PARTICIPANT_LOGIN = 'PARTICIPANT_LOGIN', // Removed
-  // PARTICIPANT_VIEW = 'PARTICIPANT_VIEW', // Removed
 }
